@@ -122,6 +122,11 @@ Always provide detailed explanations for your assessments and recommendations.
         try:
             logger.info(f"Starting assessment for application ID: {application_data.get('application_id', 'N/A')}")
             
+            # Debug: Log the structure of application_data
+            logger.info(f"Application data structure: {json.dumps({k: type(v).__name__ for k, v in application_data.items()}, indent=2)}")
+            if "applicant_info" in application_data:
+                logger.info(f"Applicant info: {json.dumps(application_data['applicant_info'], indent=2)}")
+            
             # Validate input data
             validation_result = self._validate_application_data(application_data)
             if not validation_result["valid"]:
@@ -581,15 +586,25 @@ Always provide detailed explanations for your assessments and recommendations.
         if application_data.get("wealth_info", {}).get("total_debts", 0) > 50000:
             recommended_support.append("debt_counseling")
         
+        # Extract applicant name for the prompt
+        applicant_name_for_prompt = "the applicant"
+        if application_data.get("applicant_info", {}).get("name"):
+            applicant_name_for_prompt = application_data["applicant_info"]["name"]
+        elif application_data.get("applicant_info", {}).get("full_name"):
+            applicant_name_for_prompt = application_data["applicant_info"]["full_name"]
+        
         prompt = f"""
         Generate the final recommendation for this application:
         
+        APPLICANT NAME: {applicant_name_for_prompt}
         Overall Assessment Score: {overall_score:.2f}
         Preliminary Status: {preliminary_status}
         Recommended Support Types: {recommended_support}
         
         Application Summary: {json.dumps(application_data.get('applicant_info', {}), indent=2)}
         Comprehensive Analysis: {comprehensive_assessment['comprehensive_analysis']}
+        
+        IMPORTANT: When referring to the applicant in your response, use the name "{applicant_name_for_prompt}" (not any placeholder names).
         
         Provide:
         1. Final eligibility determination with clear reasoning
@@ -609,9 +624,27 @@ Always provide detailed explanations for your assessments and recommendations.
         elif overall_score >= 0.8:
             final_status = EligibilityStatus.APPROVED.value
         
+        # Extract applicant name from multiple possible locations
+        applicant_name = "N/A"
+        
+        # Try different paths to find the name
+        if application_data.get("applicant_info", {}).get("name"):
+            applicant_name = application_data["applicant_info"]["name"]
+        elif application_data.get("applicant_info", {}).get("full_name"):
+            applicant_name = application_data["applicant_info"]["full_name"]
+        elif application_data.get("personal_info", {}).get("name"):
+            applicant_name = application_data["personal_info"]["name"]
+        elif application_data.get("personal_info", {}).get("full_name"):
+            applicant_name = application_data["personal_info"]["full_name"]
+        
+        # Log the application data structure for debugging
+        logger.info(f"Application data keys: {list(application_data.keys())}")
+        if "applicant_info" in application_data:
+            logger.info(f"Applicant info keys: {list(application_data['applicant_info'].keys())}")
+        
         return {
             "application_id": application_data.get("application_id", "N/A"),
-            "applicant_name": application_data.get("applicant_info", {}).get("name", "N/A"),
+            "applicant_name": applicant_name,
             "status": final_status,
             "overall_score": overall_score,
             "individual_assessments": comprehensive_assessment["individual_scores"],

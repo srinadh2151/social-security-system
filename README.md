@@ -223,18 +223,9 @@ pytest tests/test_integration.py
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
-## 🙏 Acknowledgments
+## Future Enhancements
 
-- OpenAI for GPT-4 integration
-- LangChain for agent framework
-- Streamlit for the amazing frontend framework
-- FastAPI for the high-performance backend
 
-## 📞 Support
-
-For support and questions:
-- Create an issue on GitHub
-- Email: srinadh.673@gmail.com
 
 ---
 

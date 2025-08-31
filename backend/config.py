@@ -48,6 +48,11 @@ class Settings:
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     ]
     
+    # Document Processing Settings
+    AUTO_PROCESS_DOCUMENTS: bool = os.getenv("AUTO_PROCESS_DOCUMENTS", "true").lower() == "true"
+    MIN_DOCUMENTS_FOR_AUTO_PROCESS: int = int(os.getenv("MIN_DOCUMENTS_FOR_AUTO_PROCESS", "3"))
+    PROCESSING_TIMEOUT: int = int(os.getenv("PROCESSING_TIMEOUT", "300"))  # 5 minutes
+    
     # Document Types
     DOCUMENT_TYPES: dict = {
         "emirates_id": "Emirates ID",

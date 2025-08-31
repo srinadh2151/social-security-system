@@ -139,7 +139,8 @@ async def upload_documents(
                 "size": len(content),
                 "content_type": file.content_type,
                 "application_id": application_id,
-                "content": content
+                "content": content,
+                "processing_status": "uploaded"
             }
             
             await db_manager.store_document(document_id, document_info)
@@ -160,10 +161,40 @@ async def upload_documents(
             
             logger.info(f"Document uploaded successfully: {file.filename} -> {document_id}")
         
+        # Trigger automatic processing if enabled and minimum documents uploaded
+        if (settings.AUTO_PROCESS_DOCUMENTS and 
+            application_id and 
+            len(uploaded_documents) >= settings.MIN_DOCUMENTS_FOR_AUTO_PROCESS):
+            try:
+                # Import document processing service
+                from req_agents.document_processing_service import DocumentProcessingService
+                
+                # Create background task for processing
+                from fastapi import BackgroundTasks
+                
+                # Add to background tasks (non-blocking)
+                async def process_documents_background():
+                    try:
+                        service = DocumentProcessingService()
+                        await service.process_uploaded_documents(
+                            applicant_info={"application_id": application_id, "auto_triggered": True}
+                        )
+                        logger.info(f"Automatic processing completed for application: {application_id}")
+                    except Exception as e:
+                        logger.error(f"Automatic processing failed for {application_id}: {str(e)}")
+                
+                # Schedule background processing
+                import asyncio
+                asyncio.create_task(process_documents_background())
+                
+            except Exception as e:
+                logger.warning(f"Could not trigger automatic processing: {str(e)}")
+        
         return DocumentUploadResponse(
             documents=uploaded_documents,
             total_uploaded=len(uploaded_documents),
-            message=f"Successfully uploaded {len(uploaded_documents)} documents"
+            message=f"Successfully uploaded {len(uploaded_documents)} documents" + 
+                   (f" - Processing started automatically" if application_id and len(uploaded_documents) >= 3 else "")
         )
         
     except HTTPException:

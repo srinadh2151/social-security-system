@@ -142,8 +142,8 @@ def main():
     
     page = st.sidebar.selectbox(
         "Choose a page:",
-        ["🏠 Home", "📝 New Application", "📄 Upload Documents", "🔄 Process Documents", "🤖 AI Assistant", "📊 Application Status"],
-        index=["🏠 Home", "📝 New Application", "📄 Upload Documents", "🔄 Process Documents", "🤖 AI Assistant", "📊 Application Status"].index(st.session_state.current_page) if st.session_state.current_page in ["🏠 Home", "📝 New Application", "📄 Upload Documents", "🔄 Process Documents", "🤖 AI Assistant", "📊 Application Status"] else 0,
+        ["🏠 Home", "📝 New Application", "📄 Upload Documents", "🤖 AI Assistant", "📊 Application Status"],
+        index=["🏠 Home", "📝 New Application", "📄 Upload Documents", "🤖 AI Assistant", "📊 Application Status"].index(st.session_state.current_page) if st.session_state.current_page in ["🏠 Home", "📝 New Application", "� UpNload Documents", "🤖 AI Assistant", "📊 Application Status"] else 0,
         key="page_selector"
     )
     
@@ -158,8 +158,6 @@ def main():
         show_application_form()
     elif page == "📄 Upload Documents":
         show_document_upload()
-    elif page == "🔄 Process Documents":
-        show_document_processing()
     elif page == "🤖 AI Assistant":
         show_chatbot()
     elif page == "📊 Application Status":
@@ -169,7 +167,7 @@ def show_home_page():
     """Display home page."""
     st.header("Welcome to UAE Social Security Application System")
     
-    col1, col2, col3 = st.columns(3)
+    col1, col2 = st.columns(2)
     
     with col1:
         st.subheader("📝 Apply for Benefits")
@@ -185,15 +183,15 @@ def show_home_page():
             st.session_state.page = "📄 Upload Documents"
             st.rerun()
     
-    with col3:
-        st.subheader("🔄 Process Documents")
-        st.write("Process uploaded documents and generate assessment.")
-        if st.button("Process Documents", key="process_docs"):
-            st.session_state.page = "🔄 Process Documents"
-            st.rerun()
+    # with col3:
+    #     st.subheader("📊 Application Status")
+    #     st.write("Check the status of your submitted applications.")
+    #     if st.button("Check Status", key="check_status_home"):
+    #         st.session_state.page = "📊 Applicatioon Status"
+    #         st.rerun()
     
     # Second row for additional features
-    col1, col2, col3 = st.columns(3)
+    col1, col2 = st.columns(2)
     
     with col1:
         st.subheader("🤖 AI Assistant")
@@ -205,9 +203,16 @@ def show_home_page():
     with col2:
         st.subheader("📊 Application Status")
         st.write("Check the status of your submitted applications.")
-        if st.button("Check Status", key="check_status"):
+        if st.button("View Results", key="view_results"):
             st.session_state.page = "📊 Application Status"
             st.rerun()
+    
+    # with col3:
+    #     st.subheader("🔄 Process Documents")
+    #     st.write("Process uploaded documents and generate assessment.")
+    #     if st.button("Process Documents", key="process_docs_home"):
+    #         st.session_state.page = "🔄 Process Documents"
+    #         st.rerun()
     
     # System Status
     st.subheader("🔧 System Status")
@@ -273,8 +278,8 @@ def show_application_form():
         st.subheader("💼 Employment Information")
         col1, col2 = st.columns(2)
         with col1:
-            employer_name = st.text_input("Employer Name *", placeholder="Tech Solutions LLC")
-            employment_start_date = st.date_input("Employment Start Date *", max_value=date.today())
+            employer_name = st.text_input("Latest Employer Name *", placeholder="Tech Solutions LLC")
+            employment_start_date = st.date_input("First Employment Start Date *", max_value=date.today())
             employment_type = st.selectbox("Employment Type *", ["full-time", "part-time", "contract"])
         
         with col2:
@@ -584,6 +589,26 @@ def upload_documents(files, application_id: str, document_types: List[str]):
             
             display_success(f"Successfully uploaded {total_uploaded} documents!")
             
+            # Show automatic processing notification and status tracking
+            if total_uploaded >= 3:
+                st.success("📊 **Automatic Processing Started**: Your documents are being processed automatically for assessment.")
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    if st.button("Check Status", key="check_status_after_upload"):
+                        st.session_state.page = "📊 Application Status"
+                        st.rerun()
+                
+                with col2:
+                    if st.button("🤖 Ask AI Assistant", key="ask_ai_after_upload"):
+                        st.session_state.page = "🤖 AI Assistant"
+                        st.rerun()
+                
+                # Show processing info
+                st.info("🔄 Your documents are being processed automatically. You can check the results in 'Application Status' or ask the AI Assistant for updates.")
+            else:
+                st.warning(f"📋 **Manual Processing Required**: Upload at least 3 documents for automatic processing. Currently uploaded: {total_uploaded}")
+            
             # Display uploaded documents
             st.subheader("📋 Uploaded Documents")
             documents = data.get("documents", [])
@@ -607,328 +632,6 @@ def upload_documents(files, application_id: str, document_types: List[str]):
     except Exception as e:
         display_error(f"An error occurred during upload: {str(e)}")
 
-def show_document_processing():
-    """Display document processing interface."""
-    st.header("🔄 Document Processing & Assessment")
-    st.write("Process uploaded documents and generate financial support assessment.")
-    
-    # Check processing service status
-    try:
-        response = requests.get(f"{BACKEND_URL}/documents/processing-status")
-        if response.status_code == 200:
-            status = response.json()
-            service_available = status.get("service_available", False)
-            uploaded_files_count = status.get("uploaded_files_count", 0)
-            processed_workflows_count = status.get("processed_workflows_count", 0)
-            
-            # Display status
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                if service_available:
-                    st.success("✅ Processing Service Available")
-                else:
-                    st.error("❌ Processing Service Unavailable")
-            
-            with col2:
-                st.metric("📁 Uploaded Files", uploaded_files_count)
-            
-            with col3:
-                st.metric("📊 Processed Workflows", processed_workflows_count)
-            
-            if not service_available:
-                st.warning("Document processing service is not available. Please contact support.")
-                return
-            
-            if uploaded_files_count == 0:
-                st.info("No documents found in uploads directory. Please upload documents first.")
-                if st.button("📄 Go to Upload Documents"):
-                    st.session_state.page = "📄 Upload Documents"
-                    st.rerun()
-                return
-            
-        else:
-            st.error("Could not check processing service status.")
-            return
-    
-    except Exception as e:
-        st.error(f"Error checking service status: {str(e)}")
-        return
-    
-    # Processing options
-    st.subheader("🚀 Processing Options")
-    
-    # Applicant information
-    with st.expander("👤 Applicant Information (Optional)", expanded=False):
-        applicant_name = st.text_input("Full Name", placeholder="Enter applicant's full name")
-        applicant_email = st.text_input("Email", placeholder="applicant@example.com")
-        applicant_phone = st.text_input("Phone", placeholder="+971-50-123-4567")
-        processing_notes = st.text_area("Processing Notes", placeholder="Any additional notes for processing...")
-    
-    # Processing buttons
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        if st.button("🔄 Process All Uploaded Documents", use_container_width=True, type="primary"):
-            process_uploaded_documents(
-                applicant_name=applicant_name,
-                applicant_email=applicant_email,
-                applicant_phone=applicant_phone,
-                processing_notes=processing_notes
-            )
-    
-    with col2:
-        if st.button("📊 View Processing History", use_container_width=True):
-            show_processing_history()
-    
-    # Display recent workflows
-    st.subheader("📋 Recent Processing Results")
-    display_recent_workflows()
-
-def process_uploaded_documents(applicant_name="", applicant_email="", applicant_phone="", processing_notes=""):
-    """Process all uploaded documents."""
-    try:
-        # Prepare applicant info
-        applicant_info = {
-            "processing_timestamp": datetime.now().isoformat(),
-            "processing_method": "streamlit_interface"
-        }
-        
-        if applicant_name:
-            applicant_info["name"] = applicant_name
-        if applicant_email:
-            applicant_info["email"] = applicant_email
-        if applicant_phone:
-            applicant_info["phone"] = applicant_phone
-        if processing_notes:
-            applicant_info["notes"] = processing_notes
-        
-        # Show processing status
-        progress_bar = st.progress(0)
-        status_text = st.empty()
-        
-        status_text.text("🔄 Initializing document processing...")
-        progress_bar.progress(10)
-        
-        # Make API call
-        payload = {
-            "applicant_info": applicant_info
-        }
-        
-        status_text.text("📄 Processing documents...")
-        progress_bar.progress(30)
-        
-        response = requests.post(
-            f"{BACKEND_URL}/documents/process-uploads",
-            json=payload,
-            timeout=300  # 5 minutes timeout
-        )
-        
-        progress_bar.progress(80)
-        status_text.text("📊 Generating assessment...")
-        
-        if response.status_code == 200:
-            result = response.json()
-            progress_bar.progress(100)
-            status_text.text("✅ Processing completed!")
-            
-            # Display results
-            display_processing_results(result)
-            
-        else:
-            progress_bar.empty()
-            status_text.empty()
-            error_data = response.json() if response.headers.get('content-type') == 'application/json' else {}
-            error_message = error_data.get("detail", f"HTTP {response.status_code}")
-            st.error(f"Processing failed: {error_message}")
-    
-    except requests.exceptions.Timeout:
-        progress_bar.empty()
-        status_text.empty()
-        st.warning("⏰ Processing timed out. This may be normal for large documents. Check processing history for results.")
-    
-    except requests.exceptions.ConnectionError:
-        progress_bar.empty()
-        status_text.empty()
-        st.error("Could not connect to backend server. Please ensure the backend is running.")
-    
-    except Exception as e:
-        progress_bar.empty()
-        status_text.empty()
-        st.error(f"An error occurred during processing: {str(e)}")
-
-def display_processing_results(result):
-    """Display processing results."""
-    st.success("🎉 Document processing completed successfully!")
-    
-    # Key metrics
-    col1, col2, col3, col4 = st.columns(4)
-    
-    with col1:
-        st.metric("📊 Overall Score", f"{result.get('overall_score', 0):.2f}")
-    
-    with col2:
-        decision = result.get('final_decision', 'N/A')
-        st.metric("🎯 Decision", decision)
-    
-    with col3:
-        duration = result.get('processing_duration', 'N/A')
-        st.metric("⏱️ Duration", duration)
-    
-    with col4:
-        docs_processed = result.get('documents_processed', 0)
-        st.metric("📄 Documents", docs_processed)
-    
-    # Workflow information
-    workflow_id = result.get('workflow_id')
-    if workflow_id:
-        st.info(f"🆔 Workflow ID: `{workflow_id}`")
-    
-    # Judgment summary
-    judgment_summary = result.get('judgment_summary')
-    if judgment_summary:
-        st.subheader("📋 Assessment Summary")
-        
-        final_judgment = judgment_summary.get('final_judgment', {})
-        support_recommendation = judgment_summary.get('support_recommendation', {})
-        risk_profile = judgment_summary.get('risk_profile', {})
-        
-        # Final judgment
-        with st.expander("🎯 Final Judgment", expanded=True):
-            col1, col2 = st.columns(2)
-            with col1:
-                st.write(f"**Decision:** {final_judgment.get('decision', 'N/A').title()}")
-                st.write(f"**Priority Level:** {final_judgment.get('priority_level', 'N/A').title()}")
-            with col2:
-                st.write(f"**Confidence Level:** {final_judgment.get('confidence_level', 'N/A').title()}")
-                st.write(f"**Overall Score:** {final_judgment.get('overall_score', 0):.2f}/1.0")
-        
-        # Support recommendations
-        with st.expander("💰 Support Recommendations"):
-            support_types = support_recommendation.get('recommended_support_types', [])
-            if support_types:
-                st.write("**Recommended Support Types:**")
-                for support_type in support_types:
-                    st.write(f"• {support_type}")
-            
-            support_amount = support_recommendation.get('estimated_support_amount', 'To be determined')
-            st.write(f"**Estimated Support Amount:** {support_amount}")
-            
-            conditions = support_recommendation.get('conditions', [])
-            if conditions:
-                st.write("**Conditions:**")
-                for condition in conditions:
-                    st.write(f"• {condition}")
-        
-        # Risk assessment
-        with st.expander("⚠️ Risk Assessment"):
-            risk_level = risk_profile.get('risk_level', 'N/A')
-            if risk_level.lower() == 'high':
-                st.error(f"**Risk Level:** {risk_level.title()}")
-            elif risk_level.lower() == 'medium':
-                st.warning(f"**Risk Level:** {risk_level.title()}")
-            else:
-                st.success(f"**Risk Level:** {risk_level.title()}")
-            
-            risk_factors = risk_profile.get('key_risk_factors', [])
-            if risk_factors:
-                st.write("**Key Risk Factors:**")
-                for factor in risk_factors:
-                    st.write(f"• {factor}")
-    
-    # Errors and warnings
-    errors = result.get('errors', [])
-    warnings = result.get('warnings', [])
-    
-    if errors:
-        with st.expander("❌ Processing Errors", expanded=False):
-            for error in errors:
-                st.error(error)
-    
-    if warnings:
-        with st.expander("⚠️ Processing Warnings", expanded=False):
-            for warning in warnings:
-                st.warning(warning)
-
-def display_recent_workflows():
-    """Display recent processing workflows."""
-    try:
-        response = requests.get(f"{BACKEND_URL}/documents/workflows")
-        if response.status_code == 200:
-            workflows_data = response.json()
-            workflows = workflows_data.get('workflows', [])
-            
-            if workflows:
-                # Display recent workflows in a table
-                recent_workflows = workflows[:5]  # Show last 5
-                
-                workflow_data = []
-                for wf in recent_workflows:
-                    workflow_data.append({
-                        "Workflow ID": wf.get('workflow_id', 'N/A')[:20] + "...",
-                        "Status": wf.get('status', 'N/A').title(),
-                        "Applicant": wf.get('applicant_name', 'N/A'),
-                        "Decision": wf.get('final_decision', 'N/A').title(),
-                        "Score": f"{wf.get('overall_score', 0):.2f}",
-                        "Duration": wf.get('processing_time', 'N/A')
-                    })
-                
-                st.dataframe(workflow_data, use_container_width=True)
-                
-                # Workflow details
-                if st.button("🔍 View Detailed Results"):
-                    show_processing_history()
-            else:
-                st.info("No processing workflows found.")
-    
-    except Exception as e:
-        st.error(f"Error loading recent workflows: {str(e)}")
-
-def show_processing_history():
-    """Show detailed processing history."""
-    st.subheader("📊 Processing History")
-    
-    try:
-        response = requests.get(f"{BACKEND_URL}/documents/workflows")
-        if response.status_code == 200:
-            workflows_data = response.json()
-            workflows = workflows_data.get('workflows', [])
-            
-            if workflows:
-                # Workflow selector
-                workflow_options = {}
-                for wf in workflows:
-                    workflow_id = wf.get('workflow_id', 'Unknown')
-                    applicant = wf.get('applicant_name', 'Unknown')
-                    status = wf.get('status', 'Unknown')
-                    display_name = f"{workflow_id[:15]}... - {applicant} ({status})"
-                    workflow_options[display_name] = workflow_id
-                
-                selected_workflow_display = st.selectbox(
-                    "Select workflow to view details:",
-                    options=list(workflow_options.keys())
-                )
-                
-                if selected_workflow_display:
-                    selected_workflow_id = workflow_options[selected_workflow_display]
-                    
-                    # Get detailed workflow status
-                    detail_response = requests.get(
-                        f"{BACKEND_URL}/documents/workflow/{selected_workflow_id}/status"
-                    )
-                    
-                    if detail_response.status_code == 200:
-                        detail_data = detail_response.json()
-                        workflow_status = detail_data.get('workflow_status', {})
-                        
-                        # Display detailed information
-                        st.json(workflow_status)
-                    else:
-                        st.error("Could not load detailed workflow information.")
-            else:
-                st.info("No processing workflows found.")
-    
-    except Exception as e:
-        st.error(f"Error loading processing history: {str(e)}")
 
 def show_chatbot():
     """Display AI chatbot interface."""
