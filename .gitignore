@@ -1,0 +1,53 @@
+# Environment
+.venv/
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# System files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Logs
+*.log
+logs/
+backend/logs/
+
+# Temporary files
+temp_docs/
+workflow_outputs/
+backend/uploads/
+
+# Sample files
+sample_*.pdf
+sample_*.txt
+sample_*.xlsx
+
+# Test files
+test_*.py
+debug_*.py
+*_demo.py
+testing.ipynb
+
+# Development files
+process_*.py
+improvements.txt
+*_COMPLETE.md
+*_INTEGRATION.md
+*_SUMMARY.md
+*_INSTRUCTIONS.md
+GIT_PUSH_PREPARATION.md
+cli_interface.py
+
+# Legacy entries (keeping for reference)
+all_agents
+pages
