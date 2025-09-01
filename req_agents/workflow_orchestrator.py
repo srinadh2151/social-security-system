@@ -168,7 +168,13 @@ Always maintain audit trails and ensure data privacy throughout the process.
             
             # Step 3: Convert to assessment format
             if processed_documents:
-                assessment_data = await self.document_processor.convert_to_assessment_format(processed_documents)
+                # Extract application_id from applicant_info if available
+                original_application_id = applicant_info.get("application_id") if applicant_info else None
+                
+                assessment_data = await self.document_processor.convert_to_assessment_format(
+                    processed_documents, 
+                    application_id=original_application_id
+                )
                 
                 # Merge with any provided applicant info
                 if applicant_info:
@@ -402,28 +408,49 @@ Always maintain audit trails and ensure data privacy throughout the process.
         return report
     
     async def _save_workflow_results(self, workflow_id: str, workflow_state: Dict[str, Any]):
-        """Save workflow results to files."""
+        """Save workflow results to files organized by application_id."""
         try:
-            # Create workflow-specific directory
-            workflow_dir = self.output_dir / workflow_id
-            workflow_dir.mkdir(exist_ok=True)
+            # Extract application_id from assessment result or applicant_info
+            application_id = None
+            
+            # Try to get application_id from assessment result
+            if workflow_state.get("assessment_result"):
+                application_id = workflow_state["assessment_result"].get("application_id")
+            
+            # Fallback to applicant_info
+            if not application_id and workflow_state.get("applicant_info"):
+                application_id = workflow_state["applicant_info"].get("application_id")
+            
+            # If still no application_id, use workflow_id as fallback
+            if not application_id:
+                application_id = workflow_id
+                logger.warning(f"No application_id found, using workflow_id: {workflow_id}")
+            
+            # Create application-specific directory
+            app_dir = self.output_dir / str(application_id)
+            app_dir.mkdir(exist_ok=True)
             
             # Save complete workflow state
-            with open(workflow_dir / "workflow_state.json", "w") as f:
+            with open(app_dir / "workflow_state.json", "w") as f:
                 json.dump(workflow_state, f, indent=2, default=str)
             
             # Save assessment result separately
             if workflow_state.get("assessment_result"):
-                with open(workflow_dir / "assessment_result.json", "w") as f:
+                with open(app_dir / "assessment_result.json", "w") as f:
+                    json.dump(workflow_state["assessment_result"], f, indent=2, default=str)
+                
+                # Also save as final_judgment.json for compatibility
+                with open(app_dir / "final_judgment.json", "w") as f:
                     json.dump(workflow_state["assessment_result"], f, indent=2, default=str)
             
             # Save comprehensive report
             if workflow_state.get("comprehensive_report"):
-                with open(workflow_dir / "comprehensive_report.json", "w") as f:
+                with open(app_dir / "comprehensive_report.json", "w") as f:
                     json.dump(workflow_state["comprehensive_report"], f, indent=2, default=str)
             
             # Generate summary report
             summary = {
+                "application_id": application_id,
                 "workflow_id": workflow_id,
                 "status": workflow_state["status"],
                 "applicant_name": workflow_state.get("assessment_result", {}).get("applicant_name", "N/A"),
@@ -435,13 +462,79 @@ Always maintain audit trails and ensure data privacy throughout the process.
                 "warnings": len(workflow_state.get("warnings", []))
             }
             
-            with open(workflow_dir / "summary.json", "w") as f:
+            with open(app_dir / "summary.json", "w") as f:
                 json.dump(summary, f, indent=2, default=str)
             
-            logger.info(f"Workflow results saved to {workflow_dir}")
+            # Generate application status file for chatbot compatibility
+            application_status = self._generate_application_status(workflow_state, application_id)
+            with open(app_dir / "application_status.json", "w") as f:
+                json.dump(application_status, f, indent=2, default=str)
+            
+            # Also save in root workflow_outputs for backward compatibility
+            with open(self.output_dir / f"application_status_{application_id}.json", "w") as f:
+                json.dump(application_status, f, indent=2, default=str)
+            
+            logger.info(f"Workflow results saved to {app_dir} (application_id: {application_id})")
             
         except Exception as e:
             logger.error(f"Failed to save workflow results: {str(e)}")
+    
+    def _generate_application_status(self, workflow_state: Dict[str, Any], application_id: str) -> Dict[str, Any]:
+        """Generate application status file for chatbot integration."""
+        assessment_result = workflow_state.get("assessment_result", {})
+        comprehensive_report = workflow_state.get("comprehensive_report", {})
+        processed_docs = workflow_state.get("processed_documents", [])
+        
+        # Extract document analysis
+        document_analysis = {}
+        for doc in processed_docs:
+            doc_type = doc.get("document_type", "unknown")
+            document_analysis[doc_type] = {
+                "status": "processed",
+                "confidence": doc.get("confidence_score", 0.0),
+                "extracted_data": doc.get("extracted_data", {})
+            }
+        
+        # Get judgment summary from comprehensive report or assessment
+        judgment_summary = {}
+        if comprehensive_report.get("executive_summary"):
+            exec_summary = comprehensive_report["executive_summary"]
+            judgment_summary = {
+                "decision": exec_summary.get("final_decision", "pending"),
+                "confidence_level": comprehensive_report.get("document_analysis", {}).get("data_confidence", "medium"),
+                "risk_level": comprehensive_report.get("risk_assessment", {}).get("risk_level", "medium"),
+                "recommended_support_types": comprehensive_report.get("recommendations", {}).get("support_types", []),
+                "estimated_support_amount": comprehensive_report.get("recommendations", {}).get("support_amount", "To be determined"),
+                "key_findings": exec_summary.get("key_findings", []),
+                "conditions": comprehensive_report.get("recommendations", {}).get("conditions", []),
+                "next_steps": comprehensive_report.get("recommendations", {}).get("next_steps", [])
+            }
+        else:
+            # Fallback to assessment result
+            judgment_summary = {
+                "decision": assessment_result.get("status", "pending"),
+                "confidence_level": "medium",
+                "risk_level": assessment_result.get("priority_level", "medium"),
+                "recommended_support_types": assessment_result.get("recommended_support_types", []),
+                "estimated_support_amount": assessment_result.get("estimated_support_amount", "To be determined"),
+                "key_findings": assessment_result.get("key_findings", []),
+                "conditions": [],
+                "next_steps": []
+            }
+        
+        return {
+            "application_id": application_id,
+            "processing_status": "completed" if workflow_state["status"] == WorkflowStatus.COMPLETED else workflow_state["status"],
+            "workflow_id": workflow_state["workflow_id"],
+            "processing_timestamp": workflow_state.get("end_time", datetime.now().isoformat()),
+            "final_decision": judgment_summary.get("decision", "pending"),
+            "overall_score": assessment_result.get("overall_score", 0.0),
+            "priority_level": assessment_result.get("priority_level", "medium"),
+            "documents_processed": len(processed_docs),
+            "processing_duration": workflow_state.get("duration", "N/A"),
+            "judgment_summary": judgment_summary,
+            "document_analysis": document_analysis
+        }
     
     def _calculate_duration(self, start_time: str, end_time: str) -> str:
         """Calculate duration between timestamps."""
@@ -459,55 +552,100 @@ Always maintain audit trails and ensure data privacy throughout the process.
             return "N/A"
     
     async def get_workflow_status(self, workflow_id: str) -> Dict[str, Any]:
-        """Get status of a specific workflow."""
-        workflow_dir = self.output_dir / workflow_id
-        
-        if not workflow_dir.exists():
+        """Get status of a specific workflow by workflow_id."""
+        try:
+            # Search through all application directories for this workflow_id
+            for app_dir in self.output_dir.iterdir():
+                if app_dir.is_dir():
+                    summary_file = app_dir / "summary.json"
+                    if summary_file.exists():
+                        with open(summary_file, "r") as f:
+                            summary = json.load(f)
+                            if summary.get("workflow_id") == workflow_id:
+                                return summary
+            
             return {"error": "Workflow not found"}
+            
+        except Exception as e:
+            return {"error": f"Failed to load workflow status: {str(e)}"}
+    
+    async def get_application_status(self, application_id: str) -> Dict[str, Any]:
+        """Get status of a specific application by application_id."""
+        app_dir = self.output_dir / str(application_id)
+        
+        if not app_dir.exists():
+            return {"error": "Application not found"}
         
         try:
-            # Load summary
-            summary_file = workflow_dir / "summary.json"
+            # Load application status
+            status_file = app_dir / "application_status.json"
+            if status_file.exists():
+                with open(status_file, "r") as f:
+                    return json.load(f)
+            
+            # Fallback to summary
+            summary_file = app_dir / "summary.json"
             if summary_file.exists():
                 with open(summary_file, "r") as f:
                     return json.load(f)
             
             # Fallback to workflow state
-            state_file = workflow_dir / "workflow_state.json"
+            state_file = app_dir / "workflow_state.json"
             if state_file.exists():
                 with open(state_file, "r") as f:
                     state = json.load(f)
                     return {
-                        "workflow_id": workflow_id,
+                        "application_id": application_id,
+                        "workflow_id": state.get("workflow_id"),
                         "status": state.get("status", "unknown"),
                         "start_time": state.get("start_time"),
                         "end_time": state.get("end_time")
                     }
             
-            return {"error": "Workflow data not found"}
+            return {"error": "Application data not found"}
             
         except Exception as e:
-            return {"error": f"Failed to load workflow status: {str(e)}"}
+            return {"error": f"Failed to load application status: {str(e)}"}
     
     async def list_workflows(self) -> List[Dict[str, Any]]:
-        """List all workflows."""
+        """List all workflows organized by application."""
         workflows = []
         
         try:
-            for workflow_dir in self.output_dir.iterdir():
-                if workflow_dir.is_dir():
-                    summary_file = workflow_dir / "summary.json"
+            for app_dir in self.output_dir.iterdir():
+                if app_dir.is_dir():
+                    summary_file = app_dir / "summary.json"
                     if summary_file.exists():
                         with open(summary_file, "r") as f:
                             workflows.append(json.load(f))
             
-            # Sort by workflow ID (newest first)
-            workflows.sort(key=lambda x: x.get("workflow_id", ""), reverse=True)
+            # Sort by application ID (newest first)
+            workflows.sort(key=lambda x: x.get("application_id", ""), reverse=True)
             
         except Exception as e:
             logger.error(f"Failed to list workflows: {str(e)}")
         
         return workflows
+    
+    async def list_applications(self) -> List[Dict[str, Any]]:
+        """List all applications with their status."""
+        applications = []
+        
+        try:
+            for app_dir in self.output_dir.iterdir():
+                if app_dir.is_dir():
+                    status_file = app_dir / "application_status.json"
+                    if status_file.exists():
+                        with open(status_file, "r") as f:
+                            applications.append(json.load(f))
+            
+            # Sort by processing timestamp (newest first)
+            applications.sort(key=lambda x: x.get("processing_timestamp", ""), reverse=True)
+            
+        except Exception as e:
+            logger.error(f"Failed to list applications: {str(e)}")
+        
+        return applications
 
 
 # Test implementation

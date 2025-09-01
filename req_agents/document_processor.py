@@ -1165,13 +1165,19 @@ Always provide structured JSON output with confidence scores for extracted data.
     
     async def convert_to_assessment_format(
         self,
-        processed_documents: List[Dict[str, Any]]
+        processed_documents: List[Dict[str, Any]],
+        application_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """Convert processed documents to assessment agent format."""
         
+        # Use provided application_id or generate a fallback
+        if not application_id:
+            application_id = f"APP-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+            logger.warning(f"No application_id provided, generated fallback: {application_id}")
+        
         # Initialize assessment data structure
         assessment_data = {
-            "application_id": f"APP-{datetime.now().strftime('%Y%m%d-%H%M%S')}",
+            "application_id": application_id,
             "applicant_info": {},
             "income_info": {},
             "employment_info": {},
@@ -1529,7 +1535,7 @@ if __name__ == "__main__":
         # Test conversion to assessment format
         if processed_docs:
             print(f"\n🔄 Converting to assessment format...")
-            assessment_data = await agent.convert_to_assessment_format(processed_docs)
+            assessment_data = await agent.convert_to_assessment_format(processed_docs, "TEST-APP-001")
             
             print(f"✅ Conversion complete!")
             print(f"Application ID: {assessment_data.get('application_id')}")

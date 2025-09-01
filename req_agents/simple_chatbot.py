@@ -8,12 +8,12 @@ import re
 from typing import Dict, Any, Optional, List
 import sys
 import os
+import json
+from pathlib import Path
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from simple_database_tools import SimpleApplicationQuery
 from search_tools import JobSearchTool, CourseRecommendationTool
-import json
-import os
 
 # Load environment variables (with fallback)
 try:
@@ -178,14 +178,54 @@ Respond as a caring, professional career counselor would:
             return "No specific applicant information available."
         
         context_parts = []
-        if applicant_context.get('name'):
-            context_parts.append(f"Name: {applicant_context['name']}")
-        if applicant_context.get('current_job'):
+        
+        # Basic information
+        if applicant_context.get('full_name') or applicant_context.get('name'):
+            name = applicant_context.get('full_name') or applicant_context.get('name')
+            context_parts.append(f"Name: {name}")
+        
+        if applicant_context.get('location'):
+            context_parts.append(f"Location: {applicant_context['location']}")
+        
+        # Current employment
+        if applicant_context.get('current_position') and applicant_context.get('current_company'):
+            context_parts.append(f"Current Role: {applicant_context['current_position']} at {applicant_context['current_company']}")
+        elif applicant_context.get('current_job'):
             context_parts.append(f"Current Role: {applicant_context['current_job']}")
-        if applicant_context.get('education'):
-            context_parts.append(f"Education: {applicant_context['education']}")
-        if applicant_context.get('experience_years'):
+        
+        # Experience
+        if applicant_context.get('total_experience_years'):
+            context_parts.append(f"Total Experience: {applicant_context['total_experience_years']} years")
+        elif applicant_context.get('experience_years'):
             context_parts.append(f"Experience: {applicant_context['experience_years']} years")
+        
+        # Education
+        if applicant_context.get('highest_degree') and applicant_context.get('institution'):
+            context_parts.append(f"Education: {applicant_context['highest_degree']} from {applicant_context['institution']}")
+        elif applicant_context.get('education'):
+            context_parts.append(f"Education: {applicant_context['education']}")
+        
+        # Employment history summary
+        if applicant_context.get('employment_history'):
+            employment_history = applicant_context['employment_history']
+            if len(employment_history) > 1:
+                companies = [job.get('company', 'Unknown') for job in employment_history[:3]]
+                context_parts.append(f"Previous Companies: {', '.join(companies)}")
+        
+        # Skills
+        if applicant_context.get('skills'):
+            skills = applicant_context['skills']
+            if isinstance(skills, list) and skills:
+                context_parts.append(f"Key Skills: {', '.join(skills[:5])}")  # Show top 5 skills
+        
+        # Application context
+        if applicant_context.get('application_status'):
+            context_parts.append(f"Application Status: {applicant_context['application_status']}")
+        
+        if applicant_context.get('requested_amount'):
+            context_parts.append(f"Support Requested: AED {applicant_context['requested_amount']:,}")
+        
+        # Age if available
         if applicant_context.get('age'):
             context_parts.append(f"Age: {applicant_context['age']}")
         
@@ -397,7 +437,10 @@ class IntelligentRouter:
             'career transition', 'next step in career', 'career development advice',
             'career strategy', 'career mentor', 'career coach', 'risks of switching',
             'should i change', 'transition while working', 'prepare for transition',
-            'at my age', 'career switch', 'changing fields', 'new career'
+            'at my age', 'career switch', 'changing fields', 'new career',
+            'transitioning to', 'moving from', 'advance in', 'senior role',
+            'what skills should i', 'how can i advance', 'career options',
+            'product management', 'ai field', 'data science', 'switching to'
         ]
         if any(keyword in user_input_lower for keyword in counseling_keywords):
             return self._handle_career_counseling(user_input, conversation_history)
@@ -428,7 +471,16 @@ class IntelligentRouter:
         return self._generate_contextual_response(user_input)
     
     def _handle_application_query(self, app_id: str) -> str:
-        """Handle application status queries."""
+        """Handle application status queries using workflow_outputs."""
+        # First try to get status from workflow_outputs
+        workflow_status = self._get_workflow_status(app_id)
+        
+        if workflow_status:
+            # Store applicant data for context from workflow outputs
+            self._extract_applicant_data_from_workflow(app_id)
+            return workflow_status + self._add_follow_up_options()
+        
+        # Fallback to database query if no workflow outputs found
         result = self.db_tool.query_application(app_id)
         
         if "No application found" in result:
@@ -436,10 +488,11 @@ class IntelligentRouter:
 ❌ {result}
 
 💡 **Please check:**
-• Make sure the application ID is correct (format: APP-YYYY-XXXXXX)
+• Make sure the application ID is correct (format: APP-YYYY-XXXXXX or UUID)
 • Try these sample IDs:
   - APP-2025-000001 (Ahmed Al Mansouri)
   - APP-2025-000004 (Aisha Al Maktoum - Approved)
+  - dd33f590-f78f-491a-825f-d14614fc7b81 (Ahmed - Processed ✅)
 
 {self._show_help_menu()}
 """
@@ -451,13 +504,440 @@ class IntelligentRouter:
         except:
             self.current_applicant_data = None
         
-        # Check for document processing status
-        processing_status = self._check_document_processing_status(app_id)
-        if processing_status:
-            result += "\n\n" + processing_status
-        
         return result + self._add_follow_up_options()
     
+    def _get_workflow_status(self, app_id: str) -> str:
+        """Get application status from workflow_outputs directory."""
+        try:
+            # Primary: Look for application directory
+            app_dir = Path(f"./workflow_outputs/{app_id}")
+            
+            if app_dir.exists() and app_dir.is_dir():
+                # Try application_status.json first
+                status_file = app_dir / "application_status.json"
+                if status_file.exists():
+                    with open(status_file, 'r') as f:
+                        status_data = json.load(f)
+                    return self._format_workflow_status(status_data)
+                
+                # Fallback to summary.json
+                summary_file = app_dir / "summary.json"
+                if summary_file.exists():
+                    with open(summary_file, 'r') as f:
+                        summary_data = json.load(f)
+                    return self._format_summary_status(summary_data, app_id)
+                
+                # Fallback to final_judgment.json
+                judgment_file = app_dir / "final_judgment.json"
+                if judgment_file.exists():
+                    with open(judgment_file, 'r') as f:
+                        judgment_data = json.load(f)
+                    return self._format_judgment_status(judgment_data, app_id)
+            
+            # Secondary: Look for legacy application status file
+            legacy_status_file = Path(f"./workflow_outputs/application_status_{app_id}.json")
+            if legacy_status_file.exists():
+                with open(legacy_status_file, 'r') as f:
+                    status_data = json.load(f)
+                return self._format_workflow_status(status_data)
+            
+            # Tertiary: Look for workflow directories that contain the app_id (legacy support)
+            workflow_dir = Path("./workflow_outputs")
+            if workflow_dir.exists():
+                for item in workflow_dir.iterdir():
+                    if item.is_dir() and app_id in item.name:
+                        return self._get_status_from_workflow_dir(item, app_id)
+            
+            return None
+            
+        except Exception as e:
+            print(f"Error reading workflow status: {str(e)}")
+            return None
+    
+    def _format_workflow_status(self, status_data: dict) -> str:
+        """Format workflow status data into a readable response."""
+        app_id = status_data.get('application_id', 'Unknown')
+        processing_status = status_data.get('processing_status', 'unknown')
+        final_decision = status_data.get('final_decision', 'pending')
+        overall_score = status_data.get('overall_score', 0)
+        processing_duration = status_data.get('processing_duration', 'N/A')
+        documents_processed = status_data.get('documents_processed', 0)
+        
+        # Get judgment summary
+        judgment = status_data.get('judgment_summary', {})
+        confidence_level = judgment.get('confidence_level', 'medium')
+        risk_level = judgment.get('risk_level', 'medium')
+        support_types = judgment.get('recommended_support_types', [])
+        support_amount = judgment.get('estimated_support_amount', 'To be determined')
+        key_findings = judgment.get('key_findings', [])
+        conditions = judgment.get('conditions', [])
+        next_steps = judgment.get('next_steps', [])
+        
+        # Get document analysis
+        doc_analysis = status_data.get('document_analysis', {})
+        
+        # Status emojis
+        status_emoji = {
+            'completed': '✅',
+            'processing': '🔄',
+            'failed': '❌',
+            'pending': '⏳'
+        }.get(processing_status, '📋')
+        
+        decision_emoji = {
+            'approved': '✅',
+            'conditionally_approved': '⚠️',
+            'pending_review': '🔍',
+            'rejected': '❌'
+        }.get(final_decision, '📋')
+        
+        # Build response
+        result = f"""
+📋 **APPLICATION STATUS REPORT**
+{'=' * 50}
+
+🆔 **Application ID:** {app_id}
+{status_emoji} **Processing Status:** {processing_status.title()}
+{decision_emoji} **Final Decision:** {final_decision.replace('_', ' ').title()}
+📈 **Overall Score:** {overall_score:.2f}/1.0
+⏱️ **Processing Duration:** {processing_duration}
+📄 **Documents Processed:** {documents_processed}
+🎯 **Confidence Level:** {confidence_level.title()}
+⚠️ **Risk Level:** {risk_level.title()}
+"""
+        
+        # Add support information
+        if support_types:
+            result += f"\n💰 **Recommended Support:** {', '.join(support_types)}"
+            result += f"\n💵 **Estimated Amount:** {support_amount}"
+        
+        # Add applicant information from document analysis
+        if doc_analysis:
+            result += f"\n\n👤 **APPLICANT INFORMATION**"
+            
+            # Emirates ID info
+            if 'emirates_id' in doc_analysis:
+                emirates_data = doc_analysis['emirates_id'].get('extracted_data', {})
+                if emirates_data:
+                    result += f"\n📇 **Name:** {emirates_data.get('name', 'N/A')}"
+                    result += f"\n🏴 **Nationality:** {emirates_data.get('nationality', 'N/A')}"
+                    result += f"\n🎂 **Age:** {emirates_data.get('age', 'N/A')}"
+                    result += f"\n🏙️ **Emirate:** {emirates_data.get('emirate', 'N/A')}"
+            
+            # Employment info
+            if 'resume' in doc_analysis:
+                resume_data = doc_analysis['resume'].get('extracted_data', {})
+                if resume_data:
+                    result += f"\n💼 **Current Job:** {resume_data.get('current_employment', 'N/A')}"
+                    result += f"\n📅 **Experience:** {resume_data.get('experience_years', 'N/A')} years"
+                    result += f"\n💰 **Monthly Salary:** AED {resume_data.get('monthly_salary', 'N/A'):,}"
+                    result += f"\n📊 **Employment Status:** {resume_data.get('employment_status', 'N/A').title()}"
+            
+            # Financial info
+            if 'bank_statement' in doc_analysis:
+                bank_data = doc_analysis['bank_statement'].get('extracted_data', {})
+                if bank_data:
+                    result += f"\n🏦 **Average Balance:** AED {bank_data.get('average_balance', 0):,}"
+                    result += f"\n📈 **Financial Stability:** {bank_data.get('financial_stability', 'N/A').title()}"
+            
+            if 'credit_report' in doc_analysis:
+                credit_data = doc_analysis['credit_report'].get('extracted_data', {})
+                if credit_data:
+                    result += f"\n📊 **Credit Score:** {credit_data.get('credit_score', 'N/A')}"
+                    result += f"\n💳 **Payment History:** {credit_data.get('payment_history', 'N/A').title()}"
+        
+        # Add key findings
+        if key_findings:
+            result += f"\n\n🔍 **KEY FINDINGS:**"
+            for finding in key_findings[:4]:
+                result += f"\n• {finding}"
+        
+        # Add conditions if any
+        if conditions:
+            result += f"\n\n⚠️ **CONDITIONS:**"
+            for condition in conditions[:3]:
+                result += f"\n• {condition}"
+        
+        # Add next steps
+        if next_steps:
+            result += f"\n\n📋 **NEXT STEPS:**"
+            for step in next_steps[:3]:
+                result += f"\n• {step}"
+        
+        return result
+    
+    def _extract_applicant_data_from_workflow(self, app_id: str):
+        """Extract applicant data from workflow outputs for context."""
+        try:
+            # Look for application directory
+            app_dir = Path(f"./workflow_outputs/{app_id}")
+            
+            if app_dir.exists():
+                status_file = app_dir / "application_status.json"
+                if status_file.exists():
+                    with open(status_file, 'r') as f:
+                        status_data = json.load(f)
+                    
+                    doc_analysis = status_data.get('document_analysis', {})
+                    
+                    # Extract key information for context
+                    applicant_data = {'application_id': app_id}  # Always include application_id
+                    
+                    # From Emirates ID
+                    if 'emirates_id' in doc_analysis:
+                        emirates_data = doc_analysis['emirates_id'].get('extracted_data', {})
+                        applicant_data.update({
+                            'name': emirates_data.get('name', ''),
+                            'age': emirates_data.get('age', 0),
+                            'nationality': emirates_data.get('nationality', ''),
+                            'emirate': emirates_data.get('emirate', '')
+                        })
+                    
+                    # From Resume
+                    if 'resume' in doc_analysis:
+                        resume_data = doc_analysis['resume'].get('extracted_data', {})
+                        applicant_data.update({
+                            'current_job': resume_data.get('current_employment', ''),
+                            'experience_years': resume_data.get('experience_years', 0),
+                            'monthly_salary': resume_data.get('monthly_salary', 0),
+                            'employment_status': resume_data.get('employment_status', '')
+                        })
+                    
+                    # From Bank Statement
+                    if 'bank_statement' in doc_analysis:
+                        bank_data = doc_analysis['bank_statement'].get('extracted_data', {})
+                        applicant_data.update({
+                            'average_balance': bank_data.get('average_balance', 0),
+                            'financial_stability': bank_data.get('financial_stability', '')
+                        })
+                    
+                    self.current_applicant_data = applicant_data
+                    return
+            
+            # Fallback - try legacy status file
+            legacy_status_file = Path(f"./workflow_outputs/application_status_{app_id}.json")
+            if legacy_status_file.exists():
+                with open(legacy_status_file, 'r') as f:
+                    status_data = json.load(f)
+                # Extract similar data from legacy format
+                doc_analysis = status_data.get('document_analysis', {})
+                applicant_data = {'application_id': app_id}
+                
+                if 'emirates_id' in doc_analysis:
+                    emirates_data = doc_analysis['emirates_id'].get('extracted_data', {})
+                    applicant_data.update({
+                        'name': emirates_data.get('name', ''),
+                        'age': emirates_data.get('age', 0)
+                    })
+                
+                if 'resume' in doc_analysis:
+                    resume_data = doc_analysis['resume'].get('extracted_data', {})
+                    applicant_data.update({
+                        'current_job': resume_data.get('current_employment', ''),
+                        'experience_years': resume_data.get('experience_years', 0)
+                    })
+                
+                self.current_applicant_data = applicant_data
+                return
+            
+            # If no workflow data found, set minimal context
+            self.current_applicant_data = {'application_id': app_id}
+            
+        except Exception as e:
+            print(f"Error extracting applicant data from workflow: {str(e)}")
+            self.current_applicant_data = {'application_id': app_id}
+    
+    def _request_application_id_for_counseling(self, user_input: str) -> str:
+        """Request application ID for better career counseling."""
+        return f"""
+🧠 **CAREER COUNSELING REQUEST**
+{'=' * 50}
+
+I'd be happy to provide personalized career counseling! However, to give you the most relevant and tailored advice, I need to understand your professional background first.
+
+**Please provide your Application ID** so I can:
+✅ Access your resume and work experience
+✅ Understand your skills and expertise
+✅ Review your career progression
+✅ Provide personalized recommendations
+
+📋 **Your Question:** "{user_input}"
+
+🆔 **How to proceed:**
+Simply share your Application ID (format: APP-YYYY-XXXXXX or UUID), and I'll provide detailed career counseling based on your actual professional profile.
+
+💡 **Example Application IDs:**
+• APP-2025-000001
+• dd33f590-f78f-491a-825f-d14614fc7b81
+• 68599245-48b5-4c20-b26f-5322e101b194
+
+Once you provide your Application ID, I'll analyze your resume and give you personalized career advice! 🚀
+"""
+    
+    def _get_enhanced_applicant_context(self, application_id: str) -> dict:
+        """Get enhanced applicant context including resume data from workflow outputs."""
+        try:
+            # Start with basic applicant data
+            enhanced_context = dict(self.current_applicant_data) if self.current_applicant_data else {}
+            
+            # Try to get resume data from workflow_state.json
+            workflow_state_file = Path(f"./workflow_outputs/{application_id}/workflow_state.json")
+            
+            if workflow_state_file.exists():
+                with open(workflow_state_file, 'r') as f:
+                    workflow_data = json.load(f)
+                
+                # Extract resume data from processed documents
+                processed_docs = workflow_data.get('processed_documents', [])
+                
+                for doc in processed_docs:
+                    if doc.get('document_type') == 'resume':
+                        structured_data = doc.get('structured_data', {})
+                        
+                        # Add personal info
+                        personal_info = structured_data.get('personal_info', {})
+                        if personal_info:
+                            enhanced_context.update({
+                                'full_name': personal_info.get('name', ''),
+                                'email': personal_info.get('email', ''),
+                                'phone': personal_info.get('phone', ''),
+                                'location': personal_info.get('address', ''),
+                                'linkedin': personal_info.get('linkedin', ''),
+                                'nationality': personal_info.get('nationality', '')
+                            })
+                        
+                        # Add employment history
+                        employment_history = structured_data.get('employment_history', [])
+                        if employment_history:
+                            enhanced_context['employment_history'] = employment_history
+                            
+                            # Get current job details
+                            current_job = employment_history[0] if employment_history else {}
+                            enhanced_context.update({
+                                'current_company': current_job.get('company', ''),
+                                'current_position': current_job.get('position', ''),
+                                'current_job_description': current_job.get('description', ''),
+                                'employment_type': current_job.get('employment_type', '')
+                            })
+                        
+                        # Add education
+                        education = structured_data.get('education', [])
+                        if education:
+                            enhanced_context['education_history'] = education
+                            
+                            # Get highest education
+                            if education:
+                                highest_ed = education[0]
+                                enhanced_context.update({
+                                    'highest_degree': highest_ed.get('degree', ''),
+                                    'institution': highest_ed.get('institution', ''),
+                                    'graduation_year': highest_ed.get('end_date', '')
+                                })
+                        
+                        # Add skills
+                        skills = structured_data.get('skills', [])
+                        if skills:
+                            enhanced_context['skills'] = skills
+                        
+                        # Add certifications
+                        certifications = structured_data.get('certifications', [])
+                        if certifications:
+                            enhanced_context['certifications'] = certifications
+                        
+                        # Add projects
+                        projects = structured_data.get('projects', [])
+                        if projects:
+                            enhanced_context['projects'] = projects
+                        
+                        # Calculate total experience
+                        if employment_history:
+                            total_months = sum(job.get('duration_months', 0) for job in employment_history)
+                            enhanced_context['total_experience_years'] = round(total_months / 12, 1)
+                        
+                        # Add raw resume text for additional context
+                        extracted_content = doc.get('extracted_content', {})
+                        resume_text = extracted_content.get('text', '')
+                        if resume_text:
+                            # Store first 2000 characters for context
+                            enhanced_context['resume_summary'] = resume_text[:2000] + "..." if len(resume_text) > 2000 else resume_text
+                        
+                        break
+                
+                # Add applicant info from workflow
+                applicant_info = workflow_data.get('applicant_info', {})
+                if applicant_info:
+                    enhanced_context.update({
+                        'application_number': applicant_info.get('application_number', ''),
+                        'requested_amount': applicant_info.get('requested_amount', 0),
+                        'application_status': applicant_info.get('application_status', '')
+                    })
+            
+            return enhanced_context
+            
+        except Exception as e:
+            print(f"Error getting enhanced context: {str(e)}")
+            # Return basic context if enhanced data unavailable
+            return dict(self.current_applicant_data) if self.current_applicant_data else {}
+    
+    def _get_status_from_workflow_dir(self, workflow_dir: Path, app_id: str) -> str:
+        """Get status from workflow directory files."""
+        try:
+            # Try to read summary.json first
+            summary_file = workflow_dir / "summary.json"
+            if summary_file.exists():
+                with open(summary_file, 'r') as f:
+                    summary_data = json.load(f)
+                return self._format_summary_status(summary_data, app_id)
+            
+            # Try final_judgment.json
+            judgment_file = workflow_dir / "final_judgment.json"
+            if judgment_file.exists():
+                with open(judgment_file, 'r') as f:
+                    judgment_data = json.load(f)
+                return self._format_judgment_status(judgment_data, app_id)
+            
+            # Fallback to listing available files
+            files = list(workflow_dir.glob("*.json"))
+            return f"""
+📋 **APPLICATION PROCESSING FOUND**
+🆔 **Application ID:** {app_id}
+📁 **Workflow Directory:** {workflow_dir.name}
+📄 **Available Files:** {len(files)} processing files found
+🔄 **Status:** Processing completed - detailed results available
+
+💡 **Note:** Detailed processing results have been generated for this application.
+"""
+            
+        except Exception as e:
+            return f"""
+📋 **APPLICATION PROCESSING FOUND**
+🆔 **Application ID:** {app_id}
+❌ **Error:** Could not read detailed status
+💡 **Details:** {str(e)}
+"""
+    
+    def _format_summary_status(self, summary_data: dict, app_id: str) -> str:
+        """Format summary data into readable status."""
+        return f"""
+📋 **APPLICATION SUMMARY**
+🆔 **Application ID:** {app_id}
+✅ **Status:** Processing completed
+📊 **Summary:** {summary_data.get('summary', 'Processing completed successfully')}
+"""
+    
+    def _format_judgment_status(self, judgment_data: dict, app_id: str) -> str:
+        """Format judgment data into readable status."""
+        decision = judgment_data.get('decision', 'Under Review')
+        confidence = judgment_data.get('confidence', 'Medium')
+        
+        return f"""
+📋 **APPLICATION JUDGMENT**
+🆔 **Application ID:** {app_id}
+⚖️ **Decision:** {decision}
+🎯 **Confidence:** {confidence}
+✅ **Status:** Final judgment completed
+"""
+
     def _check_document_processing_status(self, app_id: str) -> str:
         """Check document processing status for an application."""
         try:
@@ -598,20 +1078,30 @@ class IntelligentRouter:
     
     def _handle_career_counseling(self, user_input: str, conversation_history: list = None) -> str:
         """Handle career counseling requests using AI counselor."""
+        # Check if user has provided application context
+        if not self.current_applicant_data or not self.current_applicant_data.get('application_id'):
+            return self._request_application_id_for_counseling(user_input)
+        
+        # Get enhanced resume data from workflow outputs
+        enhanced_context = self._get_enhanced_applicant_context(self.current_applicant_data.get('application_id'))
+        
         return self.counseling_tool.provide_counseling(
             user_query=user_input,
-            applicant_context=self.current_applicant_data,
+            applicant_context=enhanced_context,
             conversation_history=conversation_history
         )
     
     def _handle_career_counseling_for_applicant(self, user_input: str, conversation_history: list = None) -> str:
         """Handle career counseling for current applicant."""
-        if not self.current_applicant_data:
-            return "Please provide your application ID first so I can understand your background for personalized counseling."
+        if not self.current_applicant_data or not self.current_applicant_data.get('application_id'):
+            return self._request_application_id_for_counseling(user_input)
+        
+        # Get enhanced resume data from workflow outputs
+        enhanced_context = self._get_enhanced_applicant_context(self.current_applicant_data.get('application_id'))
         
         return self.counseling_tool.provide_counseling(
             user_query=user_input,
-            applicant_context=self.current_applicant_data,
+            applicant_context=enhanced_context,
             conversation_history=conversation_history
         )
     
@@ -705,7 +1195,7 @@ class LangChainChatbot:
         return [
             Tool(
                 name="Application_Query",
-                description="Query application status and details using application ID (format: APP-YYYY-XXXXXX)",
+                description="Query application status and details using application ID (format: )",
                 func=self.router._handle_application_query
             ),
             Tool(
